@@ -1,6 +1,6 @@
 # MELAUDIS Dataset
 
-A brief description of what your project does, its features, and its purpose.
+MELAUDIS is the first real-world acoustic vehicle dataset collected in multi-lane multi-vehicle urban roads with up to three lanes, and with shared or dedicated tram lanes, bicycle and car park lanes. The dataset is explained in "MELAUDIS: A Large-Scale Benchmark Acoustic Dataset For Intelligent Transportation Systems Research" submitted to Nature- Scientific Data.
 
 ## Table of Contents
 1. [Installation](#installation)
@@ -24,6 +24,11 @@ cd MELAUDIS
 pip install -r requirements.txt
 ```
 
+
+
+![Vehicles_ALL](https://github.com/user-attachments/assets/eb058fd7-dc2c-4abf-9d74-2beceb35fa19)
+
+
 ## Vehicle Audio Sample Extraction
 This Python script is designed to extract specific audio segments from a stereo WAV file based on information provided in a CSV file. Each row in the CSV contains details such as the time (centered in minutes and seconds) around which the audio should be extracted, along with additional metadata like vehicle type, direction, and status. The script reads this information and then extracts and saves audio segments from the WAV file as new stereo audio files. The filenames for these files are dynamically constructed from the metadata, allowing easy identification and organization.
 
@@ -38,6 +43,8 @@ Helper functions like construct_file_name(), calculate_center_sec(), and format_
 The script begins by defining the file paths for the input WAV file, the CSV containing the segment information, and the destination folder for the extracted audio segments. It then calls the process_csv_and_extract_segments() function, which processes the CSV file row by row and extracts the corresponding audio segments. Each extracted segment is saved with a filename that reflects the context of the audio, such as vehicle type, direction, and status.
 
 This script is particularly useful for projects that involve audio event detection, such as acoustic analysis in traffic studies. By extracting and saving specific audio segments from a longer recording, the script enables researchers or analysts to focus on relevant sections of the audio, like the sounds of passing vehicles or traffic events. The descriptive filenames make it easy to manage and categorize the extracted segments based on the metadata provided in the CSV file.
+
+![Data_Anno_Conv4](https://github.com/user-attachments/assets/7c7b012d-5956-4b78-9100-84a709575293)
 
 ## Background Audio Sample Extraction
 This Python script is designed to extract specific audio segments from a stereo WAV file using information stored in a CSV file. The CSV contains metadata such as the time (in minutes and seconds) at which each audio segment should be centered, as well as details like vehicle type, direction, and status. Each row in the CSV corresponds to an audio segment to be extracted from the original WAV file.
