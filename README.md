@@ -86,3 +86,9 @@ This script is particularly useful for generating large datasets of spectrogram 
 ## Licens
 
 Provide step-by-step inst
+
+
+## contact
+
+PLease feel free to contact me for more information:
+sean.parineh@gmail.com
