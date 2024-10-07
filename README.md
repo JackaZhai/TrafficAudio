@@ -92,10 +92,10 @@ This script is particularly useful for generating large datasets of spectrogram 
 
 ## Licens
 
-Provide step-by-step inst
+Please see the license file.
 
 
 ## contact
 
-PLease feel free to contact me for more information:
+Please feel free to contact me for more information or any inquiry:
 sean.parineh@gmail.com
