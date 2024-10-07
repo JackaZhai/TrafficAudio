@@ -47,7 +47,7 @@ This script is particularly useful for projects that involve audio event detecti
 ![Data_Anno_Conv4](https://github.com/user-attachments/assets/7c7b012d-5956-4b78-9100-84a709575293)
 
 ## Background Audio Sample Extraction
-This Python script is designed to extract specific audio segments from a stereo WAV file using information stored in a CSV file. The CSV contains metadata such as the time (in minutes and seconds) at which each audio segment should be centered, as well as details like vehicle type, direction, and status. Each row in the CSV corresponds to an audio segment to be extracted from the original WAV file.
+This Python script "BG_Maker.py" (available in the repository) is designed to extract background noise audio segments from a stereo WAV file using information stored in a CSV file. The CSV contains metadata such as the time (in minutes and seconds) at which each audio segment should be centered, as well as details like vehicle type, direction, and status. Each row in the CSV corresponds to an audio segment to be extracted from the original WAV file.
 
 The script starts by importing essential libraries: librosa for handling audio loading and manipulation, soundfile for saving extracted audio segments, csv for reading the metadata file, and numpy for numerical operations.
 
@@ -67,7 +67,7 @@ This script is particularly useful for applications like acoustic analysis, wher
 
 
 ## Feature Extraction
-This Python script "BG_Maker.py" (available in the repository) is designed to process audio files from different categories (e.g., car and background sounds), generate their Mel-Spectrograms, and save these spectrograms as images for further analysis. The Mel-Spectrogram represents the energy distribution of the audio signal over time across various frequency bands. This visualization is commonly used in machine learning and audio signal processing tasks, as it provides a useful representation of the frequency content of the audio.
+This Python script "LMS_Maker.py" is designed to process audio files from different categories (e.g., car, background sounds, etc.), generate their Mel-Spectrograms, and save these spectrograms as images for further analysis. The Mel-Spectrogram represents the energy distribution of the audio signal over time across various frequency bands. This visualization is commonly used in machine learning and audio signal processing tasks, as it provides a useful representation of the frequency content of the audio.
 
 The script starts by importing the necessary libraries: librosa for handling audio files and generating the spectrogram, matplotlib for plotting and saving the spectrograms, and numpy for numerical operations. It also sets up the file paths for the directories containing the audio files and the directory where the resulting spectrogram images will be saved.
 
