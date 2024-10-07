@@ -1,12 +1,12 @@
-# Project Name
+# MELAUDIS Dataset
 
 A brief description of what your project does, its features, and its purpose.
 
 ## Table of Contents
 1. [Installation](#installation)
-2. [Vehicle Audio Sample Etraction](#contributing)
-3. [Background Audio Sample Etraction](#contributing)
-4. [Feature Extraction](#features)
+2. [Vehicle Audio Sample Extraction](#vehicle-audio-sample-extraction)
+3. [Background Audio Sample Extraction](#background-audio-sample-extraction)
+4. [Feature Extraction](#feature-extraction)
 5. [License](#license)
 6. [Contact](#contact)
 
