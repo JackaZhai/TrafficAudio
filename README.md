@@ -16,10 +16,10 @@ Provide step-by-step instructions on how to get the project up and running.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/project-name.git
+git clone https://github.com/parineh/MELAUDIS.git
 
 # Navigate to the project directory
-cd project-name
+cd MELAUDIS
 
 # Install dependencies (example for Python projects)
 pip install -r requirements.txt
