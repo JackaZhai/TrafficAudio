@@ -47,3 +47,8 @@ The core functionality is defined in several functions:
 Once the paths to the audio file, CSV file, and destination directory are defined, the script processes the CSV and extracts the corresponding audio segments, saving them with appropriately constructed filenames. Each audio segment is centered around a specific time point and includes a specified range of audio samples before and after the center.
 
 This script is particularly useful for applications like acoustic analysis, where precise audio segments need to be isolated from a larger recording, such as detecting and analyzing vehicle sounds in traffic environments. The filenames generated for each segment make it easy to identify the extracted audio based on its characteristics.
+
+
+## Licens
+
+Provide step-by-step inst
