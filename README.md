@@ -7,7 +7,7 @@ MELAUDIS is the first real-world acoustic vehicle dataset collected in multi-lan
 2. [Vehicle Audio Sample Extraction](#vehicle-audio-sample-extraction)
 3. [Background Audio Sample Extraction](#background-audio-sample-extraction)
 4. [Feature Extraction](#feature-extraction)
-5. [License](#license)
+5. [License](#License)
 6. [Contact](#contact)
 
 ## Installation
@@ -90,7 +90,7 @@ After processing each file, the script prints the number of files processed and 
 This script is particularly useful for generating large datasets of spectrogram images, which can later be used for machine learning tasks like classification or clustering. By visualizing the frequency components of audio signals over time, researchers can extract valuable features from audio data and use them to train models for tasks such as vehicle sound classification, acoustic scene analysis, or anomaly detection.
 
 
-## Licens
+## License
 
 Please see the license file.
 
