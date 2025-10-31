@@ -1,0 +1,13 @@
+{
+  "total": 19460,
+  "train": {
+    "traffic_jam": 2766,
+    "bg": 4620,
+    "free_flow": 8182
+  },
+  "val": {
+    "free_flow": 1996,
+    "bg": 1172,
+    "traffic_jam": 724
+  }
+}

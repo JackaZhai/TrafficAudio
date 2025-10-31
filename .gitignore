@@ -1,0 +1,8 @@
+# Ignore all WAV audio files
+*.wav
+
+# Common Python/IDE artifacts (kept minimal)
+__pycache__/
+.vscode/
+.env
+.pytest_cache/
