@@ -1,13 +1,13 @@
 """Training pipeline for multi-class traffic status monitoring.
 
-This module implements a light-weight training pipeline that turns raw audio
-recordings into log-Mel spectrograms and optimises a compact convolutional
-network to recognise the road status classes (e.g. free flow, light congestion
-and heavy congestion).
+This module implements an Audio Spectrogram Transformer (AST) based training
+pipeline that turns raw audio recordings into log-Mel spectrograms and
+optimises a Transformer encoder to recognise the road status classes (例如
+畅通、轻度拥堵、严重拥堵)。
 
-The script is intentionally framework-agnostic – it only depends on PyTorch and
-Torchaudio which are already part of the project requirements.  Two dataset
-layouts are supported:
+The script only depends on PyTorch/Torchaudio together with the AST reference
+implementation that ships with this repository. Two dataset layouts are
+supported:
 
 ``ImageFolder`` style
     ``train``/``val``/``test`` folders with one sub-directory per class.  This
@@ -25,7 +25,7 @@ The pipeline performs the following steps:
 * scan the dataset, build the label map and (if required) create splits;
 * compute log-Mel spectrograms on the fly with configurable parameters;
 * augment the training data with random time shifts and Gaussian noise;
-* train a small CNN classifier with cross entropy loss;
+* fine-tune an AST classifier with cross entropy loss;
 * evaluate on the validation set after each epoch and keep the best model;
 * optionally, run a final evaluation on the test split and store aggregated
   metrics.
@@ -34,16 +34,16 @@ Example usage with ``ImageFolder`` data::
 
     python -m traffic_status_monitoring.train \
         --data-root /path/to/dataset \
-        --output-dir experiments/traffic_status \
-        --epochs 50 --batch-size 32
+        --output-dir experiments/traffic_status_ast \
+        --epochs 30 --batch-size 16
 
 Example usage with the MELAUDIS dataset (point ``--data-root`` to the folder
 containing the WAV files)::
 
     python -m traffic_status_monitoring.train \
         --data-root data/MELAUDIS_Vehicles/Final_Veh \
-        --output-dir experiments/melaudis_status \
-        --val-ratio 0.15 --test-ratio 0.15
+        --output-dir experiments/melaudis_ast \
+        --val-ratio 0.15 --test-ratio 0.15 --audioset-pretrain
 
 The experiment folder will contain the trained ``best_model.pt`` checkpoint,
 ``label_mapping.json`` and ``metrics.json`` files documenting the training
@@ -56,16 +56,20 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+import sys
+
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
+from torch.cuda.amp import GradScaler, autocast
 import torchaudio
 from torchaudio import transforms as T
 
@@ -74,6 +78,26 @@ try:
     torchaudio.set_audio_backend("soundfile")
 except Exception:  # pragma: no cover - backend selection is best-effort.
     pass
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+AST_SRC = REPO_ROOT / "ast-master" / "src"
+if AST_SRC.exists() and str(AST_SRC) not in sys.path:
+    sys.path.append(str(AST_SRC))
+
+AST_PRETRAINED_DIR = (REPO_ROOT / "ast-master" / "pretrained_models").resolve()
+os.environ.setdefault("TORCH_HOME", str(AST_PRETRAINED_DIR))
+
+try:
+    from models.ast_models import ASTModel  # type: ignore
+except ModuleNotFoundError as exc:  # pragma: no cover - import error surfaced to user.
+    raise ModuleNotFoundError(
+        "Unable to import ASTModel from the bundled ast-master sources. "
+        "Please ensure dependencies (including timm==0.4.5) are installed."
+    ) from exc
+
+# Ensure the Torch cache directory always points to the local pretrained storage.
+os.environ["TORCH_HOME"] = str(AST_PRETRAINED_DIR)
 
 # ---------------------------------------------------------------------------
 # Data utilities
@@ -88,7 +112,7 @@ class DataConfig:
     target_duration: float = 5.0
     n_fft: int = 1024
     hop_length: int = 320
-    n_mels: int = 64
+    n_mels: int = 128
     f_min: float = 0.0
     f_max: Optional[float] = None
     augment: bool = True
@@ -172,9 +196,10 @@ class TrafficStatusDataset(Dataset[Tuple[Tensor, int]]):
     def _to_log_mel(self, waveform: Tensor) -> Tensor:
         mel = self.mel_transform(waveform.unsqueeze(0))
         mel = self.amplitude_to_db(mel)
+        mel = mel.squeeze(0).transpose(0, 1).contiguous()
         # Normalise each sample to zero mean / unit variance to stabilise training.
         mel = (mel - mel.mean()) / (mel.std() + 1e-6)
-        return mel
+        return mel.to(torch.float32)
 
     def __getitem__(self, index: int) -> Tuple[Tensor, int]:
         file_path, label = self.items[index]
@@ -183,6 +208,15 @@ class TrafficStatusDataset(Dataset[Tuple[Tensor, int]]):
         waveform = self._augment(waveform)
         features = self._to_log_mel(waveform)
         return features, label
+
+
+def infer_feature_shape(dataset: "TrafficStatusDataset") -> Tuple[int, int]:
+    if len(dataset) == 0:
+        raise RuntimeError("The training dataset is empty; cannot infer feature dimensions.")
+    features, _ = dataset[0]
+    if features.ndim != 2:
+        raise ValueError("Expected spectrogram features with shape (time, freq).")
+    return features.shape  # (time, freq)
 
 
 # ---------------------------------------------------------------------------
@@ -263,46 +297,6 @@ def stratified_split(
 
 
 # ---------------------------------------------------------------------------
-# Model definition
-# ---------------------------------------------------------------------------
-
-
-class ConvClassifier(nn.Module):
-    """Compact convolutional baseline for spectrogram classification."""
-
-    def __init__(self, n_mels: int, n_classes: int) -> None:
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d((2, 2)),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d((2, 2)),
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d((2, 2)),
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((1, 1)),
-        )
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(256, 128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.3),
-            nn.Linear(128, n_classes),
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        return self.classifier(self.features(x))
-
-
-# ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
 
@@ -323,10 +317,10 @@ def accuracy(predictions: Tensor, targets: Tensor) -> float:
 class TrainConfig:
     data_root: Path
     output_dir: Path
-    batch_size: int = 32
-    epochs: int = 50
-    learning_rate: float = 1e-3
-    weight_decay: float = 1e-4
+    batch_size: int = 16
+    epochs: int = 30
+    learning_rate: float = 5e-5
+    weight_decay: float = 0.05
     seed: int = 42
     num_workers: int = 4
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -471,18 +465,28 @@ def train_one_epoch(
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
+    scaler: Optional[GradScaler] = None,
 ) -> float:
     model.train()
     running_loss = 0.0
+    use_amp = scaler is not None and scaler.is_enabled()
     for inputs, targets in data_loader:
-        inputs = inputs.to(device)
-        targets = targets.to(device)
+        inputs = inputs.to(device=device, dtype=torch.float32, non_blocking=True)
+        targets = targets.to(device=device, non_blocking=True)
 
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+        with autocast(enabled=use_amp):
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+
+        if use_amp:
+            assert scaler is not None  # for type checkers
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
 
         running_loss += loss.item() * inputs.size(0)
     return running_loss / len(data_loader.dataset)
@@ -500,13 +504,13 @@ def evaluate_model(
     all_targets: List[Tensor] = []
     with torch.no_grad():
         for inputs, targets in data_loader:
-            inputs = inputs.to(device)
-            targets = targets.to(device)
+            inputs = inputs.to(device=device, dtype=torch.float32, non_blocking=True)
+            targets = targets.to(device=device, non_blocking=True)
             outputs = model(inputs)
             loss = criterion(outputs, targets)
             running_loss += loss.item() * inputs.size(0)
-            all_outputs.append(outputs.cpu())
-            all_targets.append(targets.cpu())
+            all_outputs.append(outputs.detach().cpu())
+            all_targets.append(targets.detach().cpu())
 
     outputs_tensor = torch.cat(all_outputs)
     targets_tensor = torch.cat(all_targets)
@@ -544,13 +548,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", type=Path, required=True, help="Dataset root folder.")
     parser.add_argument("--output-dir", type=Path, required=True, help="Directory to store models and logs.")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs.")
-    parser.add_argument("--batch-size", type=int, default=32, help="Mini-batch size.")
-    parser.add_argument("--learning-rate", type=float, default=1e-3, help="Initial learning rate.")
-    parser.add_argument("--weight-decay", type=float, default=1e-4, help="L2 regularisation weight.")
+    parser.add_argument("--epochs", type=int, default=30, help="Number of training epochs.")
+    parser.add_argument("--batch-size", type=int, default=16, help="Mini-batch size.")
+    parser.add_argument("--learning-rate", type=float, default=5e-5, help="Initial learning rate.")
+    parser.add_argument("--weight-decay", type=float, default=0.05, help="L2 regularisation weight.")
     parser.add_argument("--sample-rate", type=int, default=16_000, help="Target audio sample rate.")
     parser.add_argument("--duration", type=float, default=5.0, help="Clip duration (seconds) after trimming/padding.")
-    parser.add_argument("--n-mels", type=int, default=64, help="Number of Mel filter banks.")
+    parser.add_argument("--n-mels", type=int, default=128, help="Number of Mel filter banks.")
     parser.add_argument("--n-fft", type=int, default=1024, help="FFT window size.")
     parser.add_argument("--hop-length", type=int, default=320, help="Hop length for the STFT.")
     parser.add_argument("--no-augment", action="store_true", help="Disable data augmentation during training.")
@@ -570,6 +574,25 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.1,
         help="Test ratio when auto-splitting the MELAUDIS dataset (0 to disable).",
+    )
+    parser.add_argument("--fstride", type=int, default=10, help="AST patch stride on the frequency axis.")
+    parser.add_argument("--tstride", type=int, default=10, help="AST patch stride on the time axis.")
+    parser.add_argument(
+        "--model-size",
+        type=str,
+        default="base384",
+        choices=["tiny224", "small224", "base224", "base384"],
+        help="AST backbone size to instantiate.",
+    )
+    parser.add_argument(
+        "--no-imagenet-pretrain",
+        action="store_true",
+        help="Disable ImageNet pretraining when initialising AST.",
+    )
+    parser.add_argument(
+        "--audioset-pretrain",
+        action="store_true",
+        help="Load AudioSet+ImageNet pretrained weights for AST (requires download).",
     )
     return parser.parse_args()
 
@@ -616,30 +639,51 @@ def main() -> None:
     )
 
     train_dataset, val_dataset, test_dataset, index_to_name = build_datasets(train_config, data_config)
+    input_tdim, input_fdim = infer_feature_shape(train_dataset)
 
     device = torch.device(train_config.device)
-    model = ConvClassifier(n_mels=data_config.n_mels, n_classes=len(index_to_name)).to(device)
+    if args.audioset_pretrain and device.type != "cuda":
+        print(
+            "Warning: AudioSet pretraining is enabled but CUDA is not available. "
+            "Loading and fine-tuning the large AST backbone on CPU can be very slow."
+        )
+    model = ASTModel(
+        label_dim=len(index_to_name),
+        fstride=args.fstride,
+        tstride=args.tstride,
+        input_fdim=input_fdim,
+        input_tdim=input_tdim,
+        imagenet_pretrain=not args.no_imagenet_pretrain,
+        audioset_pretrain=args.audioset_pretrain,
+        model_size=args.model_size,
+        verbose=True,
+    ).to(device)
+
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         model.parameters(), lr=train_config.learning_rate, weight_decay=train_config.weight_decay
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=max(train_config.patience // 2, 2), factor=0.5, verbose=True
     )
 
+    scaler = GradScaler(enabled=device.type == "cuda")
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_config.batch_size,
         shuffle=True,
         num_workers=train_config.num_workers,
-        pin_memory=True,
+        pin_memory=device.type == "cuda",
+        persistent_workers=train_config.num_workers > 0,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
         num_workers=train_config.num_workers,
-        pin_memory=True,
+        pin_memory=device.type == "cuda",
+        persistent_workers=train_config.num_workers > 0,
     )
 
     history: List[Dict[str, float]] = []
@@ -648,7 +692,7 @@ def main() -> None:
     epochs_without_improvement = 0
 
     for epoch in range(train_config.epochs):
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler=scaler)
         val_loss, val_acc = evaluate_model(model, val_loader, criterion, device)
         scheduler.step(val_loss)
 
@@ -688,7 +732,8 @@ def main() -> None:
             batch_size=train_config.batch_size,
             shuffle=False,
             num_workers=train_config.num_workers,
-            pin_memory=True,
+            pin_memory=device.type == "cuda",
+            persistent_workers=train_config.num_workers > 0,
         )
         test_loss, test_acc = evaluate_model(model, test_loader, criterion, device)
         history.append({
