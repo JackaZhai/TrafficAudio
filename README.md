@@ -25,6 +25,45 @@
 * 方法：基于 Transformer 模型（可用 Audio Spectrogram + Transformer Encoder）。
 * 输出：各任务的训练模型、分类结果及性能评估（准确率、混淆矩阵等）。
 
+#### 交通状态监测训练脚本
+
+仓库新增了一个轻量级的多分类训练脚本 `traffic_status_monitoring/train.py`，用于基于音频的路况识别。它会自动将音频转换为对数 Mel 频谱，并训练一个卷积神经网络来区分“畅通”“轻度拥堵”“严重拥堵”等类别。
+
+脚本同时支持两种数据布局：
+
+1. **`ImageFolder` 结构** —— 已经人工划分好的 `train/val[/test]` 目录，每个目录下以子文件夹表示类别。
+2. **MELAUDIS 原始结构** —— 直接指向 `MELAUDIS_Vehicles/Final_Veh` 等包含 WAV 文件的根目录，脚本会根据文件名中的 `_FF_`、`_SF_`、`_HF_`、`_TJ_` 等标记自动推断交通状态，并按给定比例分层划分训练/验证/测试集。
+
+   这些缩写来源于数据集作者对交通状态的英文描述，对应关系如下：
+
+   | 标记 | 英文含义 | 中文说明 |
+   | --- | --- | --- |
+   | `_FF_` | Free Flow | 畅通 / 自由流 |
+   | `_SF_`, `_SL_`, `_LF_` | Slow Flow / Light Flow | 轻度拥堵 / 车速减慢 |
+   | `_HF_`, `_HC_`, `_TJ_`, `_TJF_`, `_TJN_` | Heavy Flow / Traffic Jam | 严重拥堵 / 交通阻塞 |
+
+运行示例：
+
+```
+# 针对 ImageFolder 布局
+python -m traffic_status_monitoring.train \
+    --data-root dataset_root \
+    --output-dir experiments/traffic_status \
+    --epochs 50 --batch-size 32
+
+# 针对 MELAUDIS 数据集（自动划分 70/15/15）
+python -m traffic_status_monitoring.train \
+    --data-root data/MELAUDIS_Vehicles/Final_Veh \
+    --output-dir experiments/melaudis_status \
+    --val-ratio 0.15 --test-ratio 0.15
+```
+
+训练完成后会在输出目录生成：
+
+* `best_model.pt`：验证集表现最好的模型参数；
+* `label_mapping.json`：类别索引与标签名的映射；
+* `metrics.json`：训练/验证/测试阶段的损失与准确率记录。
+
 ---
 
 ### 3. 系统整合
