@@ -1,88 +1,86 @@
-基于Transformer的智能交通系统设计与实现
+基于 Transformer 的智能交通音频识别平台
+=================================
 
-### 1. 三个子任务分工
+本仓库聚焦于利用音频信号理解道路交通状态，并围绕 MELAUDIS 数据集构建了一套完整的训练与评估流程。项目的最新版本已经将
+[AST：Audio Spectrogram Transformer](https://github.com/YuanGongND/ast)
+引入交通状态监测任务，通过 Transformer 对声学频谱建模以获得更高的识别精度。
 
-系统设计分为三个核心任务，每人负责一个：
+项目结构
+--------
 
-1. **车辆检测（Vehicle Detection）**
+* `ast-master/`：原始 AST 代码与预训练权重下载脚本。
+* `traffic_status_monitoring/`：交通状态分类训练脚本与实用函数。
+* `data/`：建议放置本地的 MELAUDIS 音频数据（仓库中不包含真实音频）。
 
-   * 基于音频特征识别是否有车辆出现。
-   * 需要二分类模型：有车/无车。
-2. **交通状态监测（Traffic Status Monitoring）**
+核心任务：交通状态监测
+----------------------
 
-   * 利用音频特征监测道路通行状态，如畅通、轻度拥堵、严重拥堵。
-   * 需要多分类模型。
-3. **车辆类型识别（Vehicle Type Classification）**
+`traffic_status_monitoring/train.py` 提供了一个端到端的训练脚本，用于将原始 WAV 音频转换成对数 Mel 频谱并输入 AST 模型进行分类。
+该脚本支持两种常见的数据集组织方式：
 
-   * 识别车辆种类（自行车、摩托车、轿车、卡车、公交车、有轨电车等）。
-   * 需要多分类模型。
+1. **`ImageFolder` 布局** —— 数据按 `train/val[/test]/<类别>` 目录存放，适合已经人工划分的自建数据集。
+2. **MELAUDIS 原始布局** —— 指向 `MELAUDIS_Vehicles/Final_Veh` 等包含 WAV 文件的根目录，脚本会依据文件名中 `_FF_`、`_SF_`、`_HF_`、
+   `_TJ_` 等片段推断交通状态标签，并按照给定比例进行分层划分。
 
----
+这些片段的含义如下：
 
-### 2. 数据与方法
+| 片段 | 英文含义 | 中文说明 |
+| --- | --- | --- |
+| `_FF_` | Free Flow | 畅通 / 自由流 |
+| `_SF_`, `_SL_`, `_LF_` | Slow/Light Flow | 轻度拥堵 / 低速通行 |
+| `_HF_`, `_HC_`, `_TJ_`, `_TJF_`, `_TJN_` | Heavy Flow / Traffic Jam | 严重拥堵 / 交通阻塞 |
 
-* 数据集：MELAUDIS（提供了车辆类型、数量、交通状态、背景噪声等音频样本）。
-* 方法：基于 Transformer 模型（可用 Audio Spectrogram + Transformer Encoder）。
-* 输出：各任务的训练模型、分类结果及性能评估（准确率、混淆矩阵等）。
+训练脚本亮点
+------------
 
-#### 交通状态监测训练脚本
+* **AST 模型集成**：默认启用 ImageNet + AudioSet 预训练的 AST Base 模型，结合 Transformer 的全局注意力建模能力。
+* **自动特征提取**：使用 Torchaudio 生成 128 维对数 Mel 频谱，自动裁剪/填充到固定时长，并在训练阶段随机平移与加性噪声增强。
+* **自适应数据拆分**：对 MELAUDIS 原始文件结构执行分层抽样，保证各类样本在训练/验证/测试集中的占比稳定。
+* **训练记录齐全**：保存最佳模型权重、标签映射与完整的指标曲线，便于后续部署与分析。
 
-仓库新增了一个轻量级的多分类训练脚本 `traffic_status_monitoring/train.py`，用于基于音频的路况识别。它会自动将音频转换为对数 Mel 频谱，并训练一个卷积神经网络来区分“畅通”“轻度拥堵”“严重拥堵”等类别。
+快速上手
+--------
 
-脚本同时支持两种数据布局：
+1. **准备环境**：安装 PyTorch、Torchaudio、timm==0.4.5 等依赖，并确保可以访问 GPU（若可选）。
+2. **下载 MELAUDIS 数据集**：将 WAV 文件置于 `data/` 目录或任意路径。
+3. **运行训练脚本**：
 
-1. **`ImageFolder` 结构** —— 已经人工划分好的 `train/val[/test]` 目录，每个目录下以子文件夹表示类别。
-2. **MELAUDIS 原始结构** —— 直接指向 `MELAUDIS_Vehicles/Final_Veh` 等包含 WAV 文件的根目录，脚本会根据文件名中的 `_FF_`、`_SF_`、`_HF_`、`_TJ_` 等标记自动推断交通状态，并按给定比例分层划分训练/验证/测试集。
-
-   这些缩写来源于数据集作者对交通状态的英文描述，对应关系如下：
-
-   | 标记 | 英文含义 | 中文说明 |
-   | --- | --- | --- |
-   | `_FF_` | Free Flow | 畅通 / 自由流 |
-   | `_SF_`, `_SL_`, `_LF_` | Slow Flow / Light Flow | 轻度拥堵 / 车速减慢 |
-   | `_HF_`, `_HC_`, `_TJ_`, `_TJF_`, `_TJN_` | Heavy Flow / Traffic Jam | 严重拥堵 / 交通阻塞 |
-
-运行示例：
-
-```
+```bash
 # 针对 ImageFolder 布局
 python -m traffic_status_monitoring.train \
     --data-root dataset_root \
-    --output-dir experiments/traffic_status \
-    --epochs 50 --batch-size 32
+    --output-dir experiments/traffic_status_ast \
+    --epochs 30 \
+    --batch-size 16
 
-# 针对 MELAUDIS 数据集（自动划分 70/15/15）
+# 针对 MELAUDIS 原始布局（自动划分 70/15/15）
 python -m traffic_status_monitoring.train \
     --data-root data/MELAUDIS_Vehicles/Final_Veh \
-    --output-dir experiments/melaudis_status \
-    --val-ratio 0.15 --test-ratio 0.15
+    --output-dir experiments/melaudis_ast \
+    --val-ratio 0.15 --test-ratio 0.15 \
+    --audioset-pretrain
 ```
 
-训练完成后会在输出目录生成：
+常用参数说明：
 
-* `best_model.pt`：验证集表现最好的模型参数；
-* `label_mapping.json`：类别索引与标签名的映射；
-* `metrics.json`：训练/验证/测试阶段的损失与准确率记录。
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--sample-rate` | 16000 | 统一的音频采样率（Hz）。 |
+| `--duration` | 5.0 | 裁剪/填充后的音频长度（秒）。 |
+| `--n-mels` | 128 | Mel 频谱通道数，AST 默认支持 128。 |
+| `--fstride` / `--tstride` | 10 / 10 | AST Patch 的频率/时间步长，可根据时频分辨率调整。 |
+| `--imagenet-pretrain` | 启用 | 是否使用 ImageNet 预训练权重。 |
+| `--audioset-pretrain` | 关闭 | 是否加载提供的 AudioSet 预训练权重（需额外下载，建议开启）。 |
 
----
+训练结束后输出目录包含：
 
-### 3. 系统整合
+* `best_model.pt`：验证集表现最佳的 AST 模型参数。
+* `label_mapping.json`：类别索引与语义标签的映射关系。
+* `metrics.json`：每个 Epoch 的损失、准确率以及可选的测试集评估结果。
 
-* 最终成果需要将三个任务整合成**一个完整的智能交通系统**。
-* **设计 GUI 界面**，展示：
+下一步工作
+----------
 
-  * 实时或离线的音频检测结果；
-  * 三个子任务的预测输出（是否有车、道路状态、车辆类型）；
-  * 可视化图表或状态指示。
-
----
-
-### 5. 进度与结题安排
-
-1. **前期准备（数据+文献学习）**：熟悉数据集、阅读参考文献。
-2. **中期开发（模型训练+单任务实现）**：完成你负责的子任务模型设计、训练与结果验证。
-3. **后期整合（系统集成+GUI设计）**：和团队成员合并各自模块，完成整体系统设计。
-4. **结题成果**：
-   * 系统源码（含模型代码、GUI程序）。
-   * 实验报告与答辩展示文档。
-   * 可运行的系统 Demo。
+* **车辆检测 / 车辆类型识别**：可复用相同的数据处理与 AST 建模框架，构建二分类或多分类任务。
+* **系统集成**：结合三个子模型以及 GUI，构建完整的智能交通监测系统，实现实时或离线的音频识别展示。
+* **可视化与报告**：基于 `metrics.json` 绘制训练曲线，并输出混淆矩阵、样例预测等分析结果。
